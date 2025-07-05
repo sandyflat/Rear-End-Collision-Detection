@@ -1,3 +1,4 @@
+
 import tkinter as tk
 from tkinter import filedialog, messagebox
 from PIL import Image, ImageTk
@@ -6,11 +7,10 @@ import cv2
 import queue
 import time
 
-from vehicle_detection import detect_vehicles
+from vehicle_detection import detect_vehicles, vehicle_classes
 from vehicle_tracking import VehicleTracker
 from speed_estimation import SpeedEstimator
 from lane_detection import draw_reverse_parking_lane
-
 
 class VideoApp:
     def __init__(self, root):
@@ -26,17 +26,30 @@ class VideoApp:
         self.frame_width = 760
         self.frame_height = 480
 
-        # Queues for threading
         self.frame_queue = queue.Queue(maxsize=5)
         self.output_queue = queue.Queue(maxsize=5)
 
-        # UI Elements
         self.display_frame = tk.Frame(root, width=self.frame_width, height=self.frame_height, bg="black", bd=2, relief=tk.SOLID)
         self.display_frame.pack(pady=10)
         self.display_frame.pack_propagate(0)
 
         self.display_label = tk.Label(self.display_frame, bg="black", fg="white", text="No video selected", font=("Arial", 16))
         self.display_label.pack(expand=True, fill=tk.BOTH)
+
+        self.lights_frame = tk.Frame(root)
+        self.lights_frame.pack(side=tk.TOP, pady=10)
+
+        self.green_light = tk.Canvas(self.lights_frame, width=30, height=30, bg='black', highlightthickness=0)
+        self.green_light.create_oval(2, 2, 28, 28, fill='green', tags='light')
+        self.green_light.pack(side=tk.LEFT, padx=5)
+
+        self.yellow_light = tk.Canvas(self.lights_frame, width=30, height=30, bg='black', highlightthickness=0)
+        self.yellow_light.create_oval(2, 2, 28, 28, fill='grey', tags='light')
+        self.yellow_light.pack(side=tk.LEFT, padx=5)
+
+        self.red_light = tk.Canvas(self.lights_frame, width=30, height=30, bg='black', highlightthickness=0)
+        self.red_light.create_oval(2, 2, 28, 28, fill='grey', tags='light')
+        self.red_light.pack(side=tk.LEFT, padx=5)
 
         self.bottom_frame = tk.Frame(root)
         self.bottom_frame.pack(side=tk.BOTTOM, anchor='w', padx=10, pady=10)
@@ -52,9 +65,22 @@ class VideoApp:
 
         self.stop_event = threading.Event()
 
-        # Vehicle pipeline components
         self.tracker = VehicleTracker()
         self.speed_estimator = SpeedEstimator(fps=30, my_speed_km_ph=30)
+
+    def update_lights(self, status):
+        if status == 'red':
+            self.red_light.itemconfig('light', fill='red')
+            self.yellow_light.itemconfig('light', fill='grey')
+            self.green_light.itemconfig('light', fill='grey')
+        elif status == 'yellow':
+            self.red_light.itemconfig('light', fill='grey')
+            self.yellow_light.itemconfig('light', fill='yellow')
+            self.green_light.itemconfig('light', fill='grey')
+        else:
+            self.red_light.itemconfig('light', fill='grey')
+            self.yellow_light.itemconfig('light', fill='grey')
+            self.green_light.itemconfig('light', fill='green')
 
     def stop_video(self):
         if self.playing:
@@ -72,6 +98,7 @@ class VideoApp:
             self.btn_play.config(state=tk.NORMAL)
             self.btn_pause_resume.config(state=tk.DISABLED)
             self.btn_pause_resume.config(text="Pause")
+            self.update_lights('green')
 
     def choose_video(self):
         self.stop_video()
@@ -100,9 +127,8 @@ class VideoApp:
         self.btn_pause_resume.config(state=tk.NORMAL)
         self.btn_pause_resume.config(text="Pause")
 
-
         self.tracker = VehicleTracker()
-        self.speed_estimator = SpeedEstimator(fps=30, my_speed_km_ph=30)  # Fixed at 30 FPS
+        self.speed_estimator = SpeedEstimator(fps=30, my_speed_km_ph=30)
 
         with self.frame_queue.mutex:
             self.frame_queue.queue.clear()
@@ -150,24 +176,56 @@ class VideoApp:
                 continue
 
             frame = cv2.resize(frame, (self.frame_width, self.frame_height))
-
-            # Draw lane zones
             lane_zones = draw_reverse_parking_lane(frame)
 
-            # Vehicle detection
-            annotated_frame, boxes = detect_vehicles(frame, lane_zones)
-
-            # Tracking
+            annotated_frame, boxes, class_ids, zone_names = detect_vehicles(frame, lane_zones, return_class_ids=True)
             tracks = self.tracker.update_tracks(boxes, frame)
 
-            for track_id, x1, y1, x2, y2 in tracks:
+            has_red = False
+            has_yellow = False
+
+            for (track_id, x1, y1, x2, y2), cls_id, zone_name in zip(tracks, class_ids, zone_names):
+                vehicle_name, base_color = vehicle_classes.get(cls_id, ("vehicle", (0, 255, 0)))
+
                 self.speed_estimator.update(track_id, y1, y2)
                 speed = self.speed_estimator.compute_speed(track_id)
-                if speed:
-                    cv2.putText(annotated_frame, f"Speed: {speed} km/h", (x1, y2 + 40),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-                cv2.putText(annotated_frame, f"ID: {track_id}", (x1, y2 + 20),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+
+                bbox_color = base_color
+
+                if zone_name == "green_zone":
+                    if speed is None or speed <= 30:
+                        bbox_color = (0, 255, 0)
+                    else:
+                        bbox_color = (0, 255, 255)
+                        has_yellow = True
+                elif zone_name == "yellow_zone":
+                    if speed is None or speed <= 40:
+                        bbox_color = (0, 255, 255)
+                        has_yellow = True
+                    else:
+                        bbox_color = (0, 0, 255)
+                        has_red = True
+                elif zone_name == "red_zone":
+                    if speed is None or speed <= 20:
+                        bbox_color = (0, 255, 255)
+                        has_yellow = True
+                    else:
+                        bbox_color = (0, 0, 255)
+                        has_red = True
+
+                cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), bbox_color, 2)
+                cv2.putText(annotated_frame, vehicle_name, (x1, y1 - 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, bbox_color, 2)
+                text_size = cv2.getTextSize(str(track_id), cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)[0]
+                cv2.putText(annotated_frame, f"ID: {track_id}", (x2 - text_size[0], y1 - 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, bbox_color, 2)
+                display_speed = f"{speed} km/h" if speed is not None else "Calculating"
+                cv2.putText(annotated_frame, f"Speed: {display_speed}", (x1, y2 + 40), cv2.FONT_HERSHEY_SIMPLEX, 0.6, bbox_color, 2)
+
+            if has_red:
+                self.update_lights('red')
+            elif has_yellow:
+                self.update_lights('yellow')
+            else:
+                self.update_lights('green')
 
             self.speed_estimator.next_frame()
 
@@ -202,3 +260,4 @@ def start_app():
     root = tk.Tk()
     app = VideoApp(root)
     root.mainloop()
+
