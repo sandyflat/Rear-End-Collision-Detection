@@ -1,5 +1,5 @@
 # Collision Detection and Awareness System
-An intelligent system for rear vehicle detection, tracking, and speed estimation using YOLOv8, DeepSORT, and homography. It provides visual lane zone classification (green/yellow/red) and real-time audio-visual alerts to help prevent collisions. The GUI is built with Tkinter.
+My final year college project. An intelligent system for rear vehicle detection, tracking, and speed estimation using YOLOv8, DeepSORT, and homography. It provides visual lane zone classification (green/yellow/red) and real-time audio-visual alerts to help prevent collisions. The GUI is built with Tkinter.
 
 ## 🚀 Features
 
@@ -54,13 +54,13 @@ Bounding boxes are drawn based on the vehicle's **zone and speed**:
 
 ### 🟢 Safe Zone
 
-<img src="Demo/safe.png" alt="Safe Zone" width="800"/>
+<img src="image/safe.png" alt="Safe Zone" width="800"/>
 
 > Vehicles in the green zone with safe speed are shown in green boxes. No alert is triggered.
 
 ### 🟡🔴 Alert Zones
 
-<img src="Demo/alert_case.png" alt="Alert Zone" width="800"/>
+<img src="image/alert_case.png" alt="Alert Zone" width="800"/>
 
 > Vehicles overlapping yellow or red zones with higher speed trigger caution (yellow) or danger (red) alerts if it exceeds speed limit.
 
